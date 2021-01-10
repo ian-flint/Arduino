@@ -1,0 +1,136 @@
+#include "ArducamSSD1306.h"
+
+ArducamSSD1306 oled(0);
+char timer[5] = "0000";
+char countdown[5] = "0000";
+int cursor = 0;
+int seconds = 0;
+int minutes = 0;
+
+void drawTimer (char* buf, int cursor, int x, int y, int size) {
+  oled.drawChar(x, y, cursor==0?'_':buf[0], 1, 0, size);
+  oled.drawChar(x+6*size, y, cursor==1?'_':buf[1], 1, 0, size);
+  oled.drawChar(x+12*size, y, ':', 1, 0, size);
+  oled.drawChar(x+18*size, y, cursor==2?'_':buf[2], 1, 0, size);
+  oled.drawChar(x+24*size, y, cursor==3?'_':buf[3], 1, 0, size);
+}
+
+void draw () {
+  oled.clearDisplay();
+  drawTimer(timer, cursor, 38, 0, 2);
+  drawTimer(countdown, 4, 23, 32, 3);
+  oled.display();    
+}
+
+
+void updateCountdown () {
+  if (seconds > 59) return;
+  if (minutes > 59) return;
+  if (seconds < 0) return;
+  if (minutes < 0) return;
+  sprintf(countdown, "%02d%02d", minutes, seconds);
+  draw();
+}
+
+void setup() {
+  // put your setup code here, to run once:
+  pinMode(2, OUTPUT);
+  pinMode(3, OUTPUT);
+  pinMode(4, OUTPUT);
+  pinMode(5, OUTPUT);
+  pinMode(6, INPUT);
+  pinMode(7, INPUT);
+  pinMode(8, INPUT);
+  pinMode(9, INPUT);
+  pinMode(10, OUTPUT);
+  Serial.begin(9600);
+  oled.begin();
+  draw();
+}
+
+char mapping[4][4] = {{'1', '2', '3', '\n'},
+                      {'4', '5', '6', '^'},
+                      {'7', '8', '9', 'v'},
+                      {'c', '0', '<', '>'}};
+char state[4][4] = {{0,0,0,0},{0,0,0,0},{0,0,0,0},{0,0,0,0}};
+
+void buzz(int targetPin, long frequency, long length) {
+  long delayValue = 1000000 / frequency / 2; // calculate the delay value between transitions
+  //// 1 second's worth of microseconds, divided by the frequency, then split in half since
+  //// there are two phases to each cycle
+  long numCycles = frequency * length / 1000; // calculate the number of cycles for proper timing
+  //// multiply frequency, which is really cycles per second, by the number of seconds to
+  //// get the total number of cycles to produce
+  for (long i = 0; i < numCycles; i++) { // for the calculated length of time...
+    digitalWrite(targetPin, HIGH); // write the buzzer pin high to push out the diaphram
+    delayMicroseconds(delayValue); // wait for the calculated delay value
+    digitalWrite(targetPin, LOW); // write the buzzer pin low to pull back the diaphram
+    delayMicroseconds(delayValue); // wait again or the calculated delay value
+  }
+}
+
+
+void processInput (char digit) {
+  if (digit >= '0' && digit <= '9') {
+    if ((cursor == 2) || (cursor == 0)) {
+      if (digit > '5') {
+        return;
+      }
+    }
+    if (cursor < 4) {
+      timer[cursor] = digit;
+      cursor++;
+    }
+  } else if (digit == 'c') {
+    strcpy(timer, "0000");
+    strcpy(countdown, "0000");
+    cursor = 0;
+  } else if (digit == '<') {
+    if (cursor > 0) {
+      cursor--;
+    }
+  } else if (digit == '>') {
+    if (cursor < 4) {
+      cursor++;
+    }
+  } else if (digit == '\n') {
+    strcpy(countdown, timer);
+    cursor=4;
+  }
+  draw();
+}
+
+void scan() {
+  int out;
+  int in;
+  for (out = 2; out <= 5; out++) {
+    for (in = 6; in <= 9; in ++) {
+      digitalWrite(out, HIGH);
+      if (digitalRead(in) == HIGH) {
+        state[in-6][out-2] += 1;
+        if ((state[in-6][out-2] == 1) || (state[in-6][out-2] > 30)) {
+          char digit = mapping[in - 6][out-2];
+          Serial.print(digit);
+          processInput(digit);
+          if (digit == '\n') {
+            buzz(10, 4000, 25);
+          } else {
+            buzz(10, 3000, 5);
+            buzz(10, 5000, 5);
+          }
+        }
+        digitalWrite(in, LOW);
+      } else {
+        if (state[in-6][out-2]) {
+          state[in-6][out-2] = 0;
+        }
+      }
+      digitalWrite(out, LOW);
+    }
+  }
+}
+
+void loop() {
+  scan();
+  delay(10);
+}
